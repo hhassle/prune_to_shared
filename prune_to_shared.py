@@ -1,5 +1,6 @@
 import os
 import re
+import random
 from glob import glob
 from Bio import Phylo
 from Bio.Phylo.BaseTree import Tree
@@ -16,6 +17,20 @@ def get_common_taxa(trees):
         taxon_sets.append(taxa)
     return set.intersection(*taxon_sets)
 
+def deduplicate_tree(tree):
+    """Remove duplicate taxa in a tree, randomly keeping one representative."""
+    taxon_to_clades = {}
+    for clade in tree.get_terminals():
+        base_name = strip_gene_suffix(clade.name)
+        taxon_to_clades.setdefault(base_name, []).append(clade)
+
+    for base_name, clades in taxon_to_clades.items():
+        if len(clades) > 1:
+            keep = random.choice(clades)
+            for clade in clades:
+                if clade is not keep:
+                    tree.prune(clade)
+
 def prune_tree(tree, common_taxa):
     """Prune tree to only include common taxa."""
     to_remove = []
@@ -25,12 +40,11 @@ def prune_tree(tree, common_taxa):
             to_remove.append(term)
     for clade in to_remove:
         tree.prune(clade)
-    return tree
 
 def main():
     # Find all .treefile and .tree files
     tree_files = glob("*.treefile") + glob("*.tree")
-    
+
     if not tree_files:
         print("No tree files found.")
         return
@@ -39,15 +53,19 @@ def main():
     trees = [Phylo.read(file, "newick") for file in tree_files]
     print(f"Loaded {len(trees)} trees.")
 
-    # Determine shared taxa
+    # Deduplicate each tree
+    for tree in trees:
+        deduplicate_tree(tree)
+
+    # Determine shared taxa after deduplication
     common_taxa = get_common_taxa(trees)
     print(f"Found {len(common_taxa)} shared taxa.")
 
     # Prune and write pruned trees
-    for i, (file, tree) in enumerate(zip(tree_files, trees)):
-        pruned = prune_tree(tree, common_taxa)
+    for file, tree in zip(tree_files, trees):
+        prune_tree(tree, common_taxa)
         output_file = f"{os.path.splitext(file)[0]}_pruned.tree"
-        Phylo.write(pruned, output_file, "newick")
+        Phylo.write(tree, output_file, "newick")
         print(f"Pruned tree saved to: {output_file}")
 
 if __name__ == "__main__":
